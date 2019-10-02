@@ -2,12 +2,13 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"strconv"
+	"time"
+
 	"github.com/jessevdk/go-flags"
 	"github.com/ziutek/mymysql/mysql"
 	_ "github.com/ziutek/mymysql/native"
-	"os"
-	"time"
-	"strconv"
 )
 
 type connectionOpts struct {
@@ -16,7 +17,6 @@ type connectionOpts struct {
 	User string `short:"u" long:"user" default:"root" description:"Username"`
 	Pass string `short:"P" long:"password" default:"" description:"Password"`
 }
-
 
 func fetchStatus(db mysql.Conn, stat map[string]string) error {
 	rows, _, err := db.Query("SHOW GLOBAL STATUS")
@@ -50,16 +50,16 @@ func fetchSlaveStatus(db mysql.Conn, stat map[string]string) error {
 		return err
 	}
 	if len(rows) < 1 {
-		stat["Slave_IO_Running"]  = "0"
-		stat["Slave_SQL_Running"]  = "0"
+		stat["Slave_IO_Running"] = "0"
+		stat["Slave_SQL_Running"] = "0"
 		stat["Seconds_Behind_Master"] = "0"
 		return nil
 	}
 
 	idxBehindMaster := res.Map("Seconds_Behind_Master")
 	stat["Seconds_Behind_Master"] = rows[0].Str(idxBehindMaster)
-	
-	keys := []string{"Slave_IO_Running","Slave_SQL_Running"}
+
+	keys := []string{"Slave_IO_Running", "Slave_SQL_Running"}
 	for _, key := range keys {
 		idx := res.Map(key)
 		val := rows[0].Str(idx)
@@ -71,7 +71,6 @@ func fetchSlaveStatus(db mysql.Conn, stat map[string]string) error {
 	}
 	return nil
 }
-
 
 func main() {
 	os.Exit(_main())
@@ -96,21 +95,21 @@ func _main() (st int) {
 	stat := make(map[string]string)
 	err = fetchStatus(db, stat)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "couldn't fetch status %s\n",err)
+		fmt.Fprintf(os.Stderr, "couldn't fetch status %s\n", err)
 		return
 	}
 
 	variable := make(map[string]string)
 	err = fetchVariables(db, variable)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "couldn't fetch variables %s\n",err)
+		fmt.Fprintf(os.Stderr, "couldn't fetch variables %s\n", err)
 		return
 	}
 
 	slaveStat := make(map[string]string)
 	err = fetchSlaveStatus(db, slaveStat)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "couldn't fetch slave statuss %s\n",err)
+		fmt.Fprintf(os.Stderr, "couldn't fetch slave statuss %s\n", err)
 		return
 	}
 
@@ -127,23 +126,20 @@ func _main() (st int) {
 	fmt.Printf("mysql-lite.threads.cached\t%s\t%d\n", stat["Threads_cached"], now)
 	fmt.Printf("mysql-lite.threads.max-connections\t%s\t%d\n", variable["max_connections"], now)
 	fmt.Printf("mysql-lite.threads.cache-size\t%s\t%d\n", variable["thread_cache_size"], now)
-	
+
 	// connection utilization
-	max_connections, err := strconv.ParseFloat(variable["max_connections"], 64)
+	maxConnections, err := strconv.ParseFloat(variable["max_connections"], 64)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed parsing max_connections: %s\n",err)
+		fmt.Fprintf(os.Stderr, "failed parsing max_connections: %s\n", err)
 		return
 	}
-	thread_connected, err := strconv.ParseFloat(stat["Threads_connected"], 64)
+	threadConnected, err := strconv.ParseFloat(stat["Threads_connected"], 64)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed parsing thread_connected: %s\n",err)
+		fmt.Fprintf(os.Stderr, "failed parsing thread_connected: %s\n", err)
 		return
 	}
-	fmt.Printf("mysql-lite.connections.utilization\t%f\t%d\n",thread_connected/max_connections*100 , now)
+	fmt.Printf("mysql-lite.connections.utilization\t%f\t%d\n", threadConnected/maxConnections*100, now)
 
 	st = 0
 	return
 }
-
-
-
