@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"runtime"
 	"strconv"
 	"time"
 
@@ -11,11 +12,15 @@ import (
 	_ "github.com/ziutek/mymysql/native"
 )
 
+// Version by Makefile
+var version string
+
 type connectionOpts struct {
-	Host string `short:"H" long:"host" default:"localhost" description:"Hostname"`
-	Port string `short:"p" long:"port" default:"3306" description:"Port"`
-	User string `short:"u" long:"user" default:"root" description:"Username"`
-	Pass string `short:"P" long:"password" default:"" description:"Password"`
+	Host    string `short:"H" long:"host" default:"localhost" description:"Hostname"`
+	Port    string `short:"p" long:"port" default:"3306" description:"Port"`
+	User    string `short:"u" long:"user" default:"root" description:"Username"`
+	Pass    string `short:"P" long:"password" default:"" description:"Password"`
+	Version bool   `short:"v" long:"version" description:"Show version"`
 }
 
 func fetchStatus(db mysql.Conn, stat map[string]string) error {
@@ -78,9 +83,17 @@ func main() {
 
 func _main() (st int) {
 	opts := connectionOpts{}
-	psr := flags.NewParser(&opts, flags.Default)
+	psr := flags.NewParser(&opts, flags.HelpFlag|flags.PassDoubleDash)
 	_, err := psr.Parse()
+	if opts.Version {
+		fmt.Fprintf(os.Stderr, "Version: %s\nCompiler: %s %s\n",
+			version,
+			runtime.Compiler,
+			runtime.Version())
+		os.Exit(0)
+	}
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}
 
