@@ -23,89 +23,29 @@ type Opts struct {
 	Version bool          `short:"v" long:"version" description:"Show version"`
 }
 
-func colMap(rows *sql.Rows) (map[string]string, error) {
-	result := map[string]string{}
-	for rows.Next() {
-		var n string
-		var v string
-		err := rows.Scan(&n, &v)
-		if err != nil {
-			return nil, err
-		}
-		result[n] = v
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return result, nil
-}
-
 func fetchStatus(db *sql.DB) (map[string]string, error) {
-	rows, err := db.Query("SHOW GLOBAL STATUS")
-	if err != nil {
-		return nil, err
-	}
-	return colMap(rows)
+	return mysqlflags.QueryMapCol(db, "SHOW GLOBAL STATUS")
 }
 
 func fetchVariables(db *sql.DB) (map[string]string, error) {
-	rows, err := db.Query("SHOW VARIABLES")
-	if err != nil {
-		return nil, err
-	}
-	return colMap(rows)
-}
-
-func rowMap(rows *sql.Rows) ([]map[string]string, error) {
-	cols, err := rows.Columns()
-	if err != nil {
-		return nil, err
-	}
-	c := make([]string, len(cols))
-	for i, v := range cols {
-		c[i] = v
-	}
-	result := []map[string]string{}
-	for rows.Next() {
-		vals := make([]interface{}, len(cols))
-		for index := range vals {
-			vals[index] = new(sql.RawBytes)
-		}
-		err = rows.Scan(vals...)
-		if err != nil {
-			return nil, err
-		}
-		r := map[string]string{}
-		for i := range vals {
-			r[c[i]] = string(*vals[i].(*sql.RawBytes))
-		}
-		result = append(result, r)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return result, err
+	return mysqlflags.QueryMapCol(db, "SHOW VARIABLES")
 }
 
 func fetchSlaveStatus(db *sql.DB) (map[string]string, error) {
-	rows, err := db.Query("SHOW SLAVE STATUS")
+	rows, err := mysqlflags.QueryMapRows(db, "SHOW SLAVE STATUS")
 	if err != nil {
 		return nil, err
 	}
-	st, err := rowMap(rows)
-	if err != nil {
-		return nil, err
-	}
-	if len(st) == 0 {
+	if len(rows) == 0 {
 		return map[string]string{
 			"Slave_IO_Running":      "0",
 			"Slave_SQL_Running":     "0",
 			"Seconds_Behind_Master": "0",
 		}, nil
 	}
-	status := st[0]
+	row := rows[0]
 	result := map[string]string{}
-	v, ok := status["Seconds_Behind_Master"]
+	v, ok := row["Seconds_Behind_Master"]
 	if !ok {
 		return nil, fmt.Errorf("No Seconds_Behind_Master in result")
 	}
@@ -113,7 +53,7 @@ func fetchSlaveStatus(db *sql.DB) (map[string]string, error) {
 
 	keys := []string{"Slave_IO_Running", "Slave_SQL_Running"}
 	for _, k := range keys {
-		v, ok := status[k]
+		v, ok := row[k]
 		if !ok {
 			return nil, fmt.Errorf("No %s in result", k)
 		}
