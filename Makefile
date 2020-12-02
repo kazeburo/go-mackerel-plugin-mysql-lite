@@ -1,5 +1,5 @@
 VERSION=0.0.4
-LDFLAGS=-ldflags "-X main.version=${VERSION}"
+LDFLAGS=-ldflags "-w -s -X main.version=${VERSION}"
 GO111MODULE=on
 
 all: mackerel-plugin-mysql-lite
