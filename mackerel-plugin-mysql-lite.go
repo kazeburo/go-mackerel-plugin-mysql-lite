@@ -28,12 +28,6 @@ type slave struct {
 	Behind     int64 `mysqlvar:"Seconds_Behind_Master"`
 }
 
-type slaveMetric struct {
-	IORunning  int64
-	SQLRunning int64
-	Behind     int64
-}
-
 type threads struct {
 	Running   int64 `mysqlvar:"Threads_running"`
 	Connected int64 `mysqlvar:"Threads_connected"`
