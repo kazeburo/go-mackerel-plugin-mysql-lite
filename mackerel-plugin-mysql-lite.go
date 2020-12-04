@@ -6,7 +6,6 @@ import (
 	"log"
 	"os"
 	"runtime"
-	"strconv"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -17,63 +16,55 @@ import (
 // Version by Makefile
 var version string
 
-type Opts struct {
+type opts struct {
 	mysqlflags.MyOpts
 	Timeout time.Duration `long:"timeout" default:"10s" description:"Timeout to connect mysql"`
 	Version bool          `short:"v" long:"version" description:"Show version"`
 }
 
-func fetchStatus(db *sql.DB) (map[string]string, error) {
-	return mysqlflags.QueryMapCol(db, "SHOW GLOBAL STATUS")
+type slave struct {
+	IORunning  bool  `mysqlvar:"Slave_IO_Running"`
+	SQLRunning bool  `mysqlvar:"Slave_SQL_Running"`
+	Behind     int64 `mysqlvar:"Seconds_Behind_Master"`
 }
 
-func fetchVariables(db *sql.DB) (map[string]string, error) {
-	return mysqlflags.QueryMapCol(db, "SHOW VARIABLES")
+type threads struct {
+	Running   int64 `mysqlvar:"Threads_running"`
+	Connected int64 `mysqlvar:"Threads_connected"`
+	Cached    int64 `mysqlvar:"Threads_cached"`
 }
 
-func fetchSlaveStatus(db *sql.DB) (map[string]string, error) {
-	rows, err := mysqlflags.QueryMapRows(db, "SHOW SLAVE STATUS")
+type connections struct {
+	Max       int64 `mysqlvar:"max_connections"`
+	CacheSize int64 `mysqlvar:"thread_cache_size"`
+}
+
+func fetchSlaveStatus(db *sql.DB) (*slave, error) {
+	var slaves []slave
+	err := mysqlflags.Query(db, "SHOW SLAVE STATUS").Scan(&slaves)
 	if err != nil {
 		return nil, err
 	}
-	if len(rows) == 0 {
-		return map[string]string{
-			"Slave_IO_Running":      "0",
-			"Slave_SQL_Running":     "0",
-			"Seconds_Behind_Master": "0",
-		}, nil
+	if len(slaves) == 0 {
+		return &slave{}, nil
 	}
-	row := rows[0]
-	result := map[string]string{}
-	v, ok := row["Seconds_Behind_Master"]
-	if !ok {
-		return nil, fmt.Errorf("No Seconds_Behind_Master in result")
-	}
-	result["Seconds_Behind_Master"] = v
-
-	keys := []string{"Slave_IO_Running", "Slave_SQL_Running"}
-	for _, k := range keys {
-		v, ok := row[k]
-		if !ok {
-			return nil, fmt.Errorf("No %s in result", k)
-		}
-		switch v {
-		case "Yes":
-			result[k] = "1"
-		default:
-			result[k] = "0"
-		}
-	}
-
-	return result, nil
+	slave := slaves[0]
+	return &slave, nil
 }
 
 func main() {
 	os.Exit(_main())
 }
 
+func btoi(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
 func _main() int {
-	opts := Opts{}
+	opts := opts{}
 	psr := flags.NewParser(&opts, flags.HelpFlag|flags.PassDoubleDash)
 	_, err := psr.Parse()
 	if opts.Version {
@@ -95,19 +86,21 @@ func _main() int {
 	}
 	defer db.Close()
 
-	st, err := fetchStatus(db)
+	var threads threads
+	err = mysqlflags.Query(db, "SHOW GLOBAL STATUS").Scan(&threads)
 	if err != nil {
 		log.Printf("couldn't fetch status: %v", err)
 		return 1
 	}
 
-	val, err := fetchVariables(db)
+	var connections connections
+	err = mysqlflags.Query(db, "SHOW VARIABLES").Scan(&connections)
 	if err != nil {
 		log.Printf("couldn't fetch variables: %v", err)
 		return 1
 	}
 
-	slaveSt, err := fetchSlaveStatus(db)
+	slave, err := fetchSlaveStatus(db)
 	if err != nil {
 		log.Printf("couldn't fetch slave status: %v", err)
 		return 1
@@ -116,29 +109,18 @@ func _main() int {
 	now := int32(time.Now().Unix())
 
 	// slave status
-	fmt.Printf("mysql-lite.replication-behind-master.second\t%s\t%d\n", slaveSt["Seconds_Behind_Master"], now)
-	fmt.Printf("mysql-lite.replication-threads.io\t%s\t%d\n", slaveSt["Slave_IO_Running"], now)
-	fmt.Printf("mysql-lite.replication-threads.sql\t%s\t%d\n", slaveSt["Slave_SQL_Running"], now)
+	fmt.Printf("mysql-lite.replication-behind-master.second\t%d\t%d\n", slave.Behind, now)
+	fmt.Printf("mysql-lite.replication-threads.io\t%d\t%d\n", btoi(slave.IORunning), now)
+	fmt.Printf("mysql-lite.replication-threads.sql\t%d\t%d\n", btoi(slave.SQLRunning), now)
 
 	// thread
-	fmt.Printf("mysql-lite.threads.running\t%s\t%d\n", st["Threads_running"], now)
-	fmt.Printf("mysql-lite.threads.connected\t%s\t%d\n", st["Threads_connected"], now)
-	fmt.Printf("mysql-lite.threads.cached\t%s\t%d\n", st["Threads_cached"], now)
-	fmt.Printf("mysql-lite.threads.max-connections\t%s\t%d\n", val["max_connections"], now)
-	fmt.Printf("mysql-lite.threads.cache-size\t%s\t%d\n", val["thread_cache_size"], now)
+	fmt.Printf("mysql-lite.threads.running\t%d\t%d\n", threads.Running, now)
+	fmt.Printf("mysql-lite.threads.connected\t%d\t%d\n", threads.Connected, now)
+	fmt.Printf("mysql-lite.threads.cached\t%d\t%d\n", threads.Cached, now)
+	fmt.Printf("mysql-lite.threads.max-connections\t%d\t%d\n", connections.Max, now)
+	fmt.Printf("mysql-lite.threads.cache-size\t%d\t%d\n", connections.CacheSize, now)
 
-	// connection utilization
-	maxConnections, err := strconv.ParseFloat(val["max_connections"], 64)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed parsing max_connections: %s\n", err)
-		return 1
-	}
-	threadConnected, err := strconv.ParseFloat(st["Threads_connected"], 64)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed parsing thread_connected: %s\n", err)
-		return 1
-	}
-	fmt.Printf("mysql-lite.connections.utilization\t%f\t%d\n", threadConnected/maxConnections*100, now)
+	fmt.Printf("mysql-lite.connections.utilization\t%f\t%d\n", float64(threads.Connected*100)/float64(connections.Max), now)
 
 	return 0
 }
